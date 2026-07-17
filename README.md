@@ -1,6 +1,6 @@
 # Herdr Recent Navigator
 
-A recent workspaces/tabs/panes switcher for Herdr. Opens an overlay listing
+A recent workspaces/tabs/panes switcher for Herdr. Opens an popup listing
 recently focused workspaces, tabs, panes, and AI agents — fuzzy-searchable and
 navigable by keyboard.
 
