@@ -1,10 +1,24 @@
 # Herdr Recent Navigator
 
-A recent workspaces/tabs/panes switcher for Herdr. Opens an popup listing
+A recent workspaces/tabs/panes switcher for [Herdr](https://herdr.dev/) **≥0.7.4**. Opens an popup listing
 recently focused workspaces, tabs, panes, and AI agents — fuzzy-searchable and
 navigable by keyboard.
 
-![Screenshot](https://github.com/beyondlex/images/blob/main/herdr-recent-navigator-1.png)
+
+![Screenshot](https://github.com/beyondlex/images/blob/main/herdr-recent-navigator-snapshot.png)
+
+<p align="center">
+  <img alt="Herdr 0.7.4+" src="https://img.shields.io/badge/Herdr-0.7.4%2B-6693ff" />
+  <img alt="Linux and macOS" src="https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-2eb14f" />
+  <img alt="Release" src="https://img.shields.io/github/v/release/beyondlex/herdr-recent-navigator
+" />
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-cd933e" /></a>
+</p>
+
+## Demo
+
+<video src="https://github.com/beyondlex/images/blob/main/videos/recent-navigator.mp4" controls="controls" muted="muted" style="max-width: 1370px" autoplay="autoplay" loop="loop">
+</video>
 
 ## Features
 
@@ -14,6 +28,12 @@ navigable by keyboard.
 - **Live agent status**: Working agents show a braille spinner; status updates
   in real time without reopening
 - **Herdr-native colors**: TokyoNight palette, consistent with the Herdr UI
+
+  > **Theme auto-detection** — Herdr currently does not expose the active theme
+  > name to plugins. The navigator uses a dark TokyoNight palette by default,
+  > configurable to `"light"` in `herdr-plugin.toml:7`. Full per-theme color
+  > matching will be added once Herdr sends the theme name via
+  > `HERDR_PLUGIN_CONTEXT_JSON`.
 - **Automatic tracking**: hooks into `workspace.focused`, `pane.focused`,
   `tab.focused` events to build `MRU` history
 
@@ -75,7 +95,7 @@ Reload:
 herdr server reload-config
 ```
 
-Press the shortcut to open the navigator overlay.
+Press the shortcut to open the navigator popup.
 
 ## Usage
 

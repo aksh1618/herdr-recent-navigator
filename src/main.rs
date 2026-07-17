@@ -227,6 +227,11 @@ fn run_inner(
     let mut state = AppState::new(nodes);
     state.theme_name = ctx.theme_name.clone();
 
+    // Fallback: read theme from plugin manifest when env doesn't provide it
+    if state.theme_name.is_none() {
+        state.theme_name = read_manifest_theme();
+    }
+
     if let Some(last) = AppState::load_last_category() {
         state.current_category = last;
     }
@@ -626,6 +631,17 @@ fn handle_pane_open() -> Result<()> {
     }
 
     std::process::exit(output.status.code().unwrap_or(1));
+}
+
+/// Read the `theme` field from the plugin's own manifest (`herdr-plugin.toml`).
+/// Used as fallback when Herdr doesn't provide `theme_name` in the context.
+/// Returns `None` if the manifest is missing, unreadable, or has no theme field.
+fn read_manifest_theme() -> Option<String> {
+    let root = std::env::var("HERDR_PLUGIN_ROOT").ok()?;
+    let path = PathBuf::from(root).join("herdr-plugin.toml");
+    let content = std::fs::read_to_string(path).ok()?;
+    let value: toml::Value = content.parse().ok()?;
+    value.get("theme")?.as_str().map(String::from)
 }
 
 /// Extract pane_id from `herdr plugin pane open` JSON response.

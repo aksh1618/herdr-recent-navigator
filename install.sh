@@ -4,7 +4,23 @@ set -euo pipefail
 REPO="beyondlex/herdr-recent-navigator"
 VERSION="${1:-latest}"
 
-# Detect platform
+# ── Colors ──────────────────────────────────────────
+BOLD='\033[1m'
+DIM='\033[2m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+info()  { printf "  ${CYAN}→${NC}  %s\n" "$*"; }
+ok()    { printf "  ${GREEN}✔${NC}  %s\n" "$*"; }
+warn()  { printf "  ${YELLOW}⚠${NC}  %s\n" "$*"; }
+fail()  { printf "  ${RED}✘${NC}  %s\n" "$*"; exit 1; }
+header(){ printf "\n  ${BOLD}%s${NC}\n  ${DIM}%s${NC}\n\n" "━━━ $* ━━━" "────────────────────────────────────────"; }
+
+# ── Detect platform ─────────────────────────────────
+header "Checking platform"
 ARCH=$(uname -m)
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 
@@ -13,28 +29,32 @@ case "$OS-$ARCH" in
   darwin-arm64)  TARGET="aarch64-apple-darwin" ;;
   darwin-x86_64) TARGET="x86_64-apple-darwin" ;;
   *)
-    echo "Unsupported platform: $OS $ARCH"
-    exit 1
+    fail "Unsupported platform: $OS $ARCH"
     ;;
 esac
+ok "Detected $OS ($ARCH) → $TARGET"
 
-# Resolve version
+# ── Resolve version ──────────────────────────────────
+header "Resolving version"
 if [ "$VERSION" = "latest" ]; then
   VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | sed 's/.*"tag_name": "\(.*\)",/\1/')
 fi
+ok "Version $VERSION"
 
 BIN="herdr-recent-navigator"
 INSTALL_DIR="${HOME}/.local/share/herdr-recent-navigator"
 mkdir -p "$INSTALL_DIR"
 
+# ── Download binary ──────────────────────────────────
+header "Downloading binary"
 URL="https://github.com/$REPO/releases/download/$VERSION/$BIN-$TARGET"
-echo "Downloading $BIN $VERSION ($TARGET)..."
+info "Fetching $BIN $VERSION ($TARGET)..."
 curl -fsSL "$URL" -o "$INSTALL_DIR/$BIN"
 chmod +x "$INSTALL_DIR/$BIN"
+ok "Installed to $INSTALL_DIR/$BIN"
 
-echo "Installed to $INSTALL_DIR/$BIN"
-
-# Generate plugin manifest
+# ── Generate plugin manifest ─────────────────────────
+header "Generating plugin manifest"
 cat > "$INSTALL_DIR/herdr-plugin.toml" <<PLUGIN_EOF
 id = "beyondlex.herdr-recent-navigator"
 name = "Herdr Recent Navigator"
@@ -97,15 +117,20 @@ placement = "popup"
 command = ["herdr-recent-navigator"]
 PLUGIN_EOF
 
-# Symlink into PATH
+# ── Symlink into PATH ────────────────────────────────
+header "Setting up PATH"
 mkdir -p "${HOME}/.local/bin"
 ln -sf "$INSTALL_DIR/$BIN" "${HOME}/.local/bin/$BIN"
+ok "Symlinked to ${HOME}/.local/bin/$BIN"
 
-# Link into herdr from persistent plugin directory
+# ── Link into Herdr ──────────────────────────────────
+header "Linking Herdr plugin"
 if command -v herdr &>/dev/null; then
-  echo "Linking plugin into Herdr..."
+  info "Linking plugin into Herdr..."
   herdr plugin link "$INSTALL_DIR"
-  echo "Done! Bind a shortcut to recent-navigator.open in your Herdr config."
+  printf "\n  ${GREEN}${BOLD}✔ Installation complete!${NC}\n"
+  printf "  ${DIM}Bind a shortcut to${NC} ${BOLD}recent-navigator.open${NC} ${DIM}in your Herdr config.${NC}\n\n"
 else
-  echo "Herdr not found. Install Herdr first, then run: herdr plugin link $INSTALL_DIR"
+  warn "Herdr not found. Install Herdr first, then run:"
+  printf "  ${CYAN}herdr plugin link${NC} ${DIM}%s${NC}\n\n" "$INSTALL_DIR"
 fi
