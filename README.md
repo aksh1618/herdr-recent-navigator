@@ -1,6 +1,6 @@
 # Herdr Recent Navigator
 
-A recent workspaces/tabs/panes switcher for [Herdr](https://herdr.dev/) **≥0.7.4**. Opens an popup listing
+A recent workspaces/tabs/panes switcher for [Herdr](https://herdr.dev/). Opens an popup listing
 recently focused workspaces, tabs, panes, and AI agents — fuzzy-searchable and
 navigable by keyboard.
 
@@ -32,16 +32,31 @@ navigable by keyboard.
 
 ## Install
 
+> **Warning:** Requires Herdr **≥ 0.7.4**. Check with `herdr -V`.  
+> To upgrade Herdr, see [herdr.dev/docs/install/#update](https://herdr.dev/docs/install/#update).
+
+> **Recommendation:** Use the curl method — no Rust toolchain required.
+
 ### Quick install (curl | bash)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/beyondlex/herdr-recent-navigator/main/install.sh | bash
 ```
 
-This downloads the prebuilt binary for your platform, places it in
-`~/.local/bin/`, and links it into Herdr.
+Downloads a prebuilt binary for your platform to `~/.local/bin/` and links it
+into Herdr.
 
-### Build from source
+### Install via Herdr plugin manager
+
+```bash
+herdr plugin install beyondlex/herdr-recent-navigator
+```
+
+Herdr clones the repo, builds from source, and registers the plugin
+automatically. Equivalent to the build-from-source steps below, but
+orchestrated by Herdr to a preset location.
+
+### Build from source (manual)
 
 ```bash
 git clone https://github.com/beyondlex/herdr-recent-navigator
@@ -50,11 +65,13 @@ cargo build --release
 herdr plugin link "$PWD"
 ```
 
-Verify the plugin is registered:
+## Upgrade
 
-```bash
-herdr plugin action list --plugin beyondlex.herdr-recent-navigator
-```
+| Current install method | Upgrade command |
+|---|---|
+| curl \| bash | Re-run the curl command |
+| `herdr plugin install` | `herdr plugin uninstall beyondlex.herdr-recent-navigator && herdr plugin install beyondlex/herdr-recent-navigator` |
+| Build from source | `git pull && cargo build --release && herdr plugin unlink beyondlex.herdr-recent-navigator && herdr plugin link "$PWD"` |
 
 ## Bind a shortcut
 
@@ -92,20 +109,24 @@ Press the shortcut to open the navigator popup.
 
 ## Configuration
 
-Open the plugin manifest at the path shown by:
+The plugin reads its theme from the `theme` field in `herdr-plugin.toml`.
+Where to find that file depends on how you installed:
 
-```bash
-herdr plugin list --json | grep manifest_path
-```
+| Install method | Manifest location |
+|---|---|
+| curl \| bash | `~/.local/share/herdr-recent-navigator/herdr-plugin.toml` |
+| `herdr plugin install`  | `~/.config/herdr/plugins/github/beyondlex.herdr-recent-navigator-*/herdr-plugin.toml` |
+| Build from source | `$PWD/herdr-plugin.toml` (repo root) |
 
 Add or edit the `theme` field:
 
 ```toml
-# ~/.local/share/herdr-recent-navigator/herdr-plugin.toml
 theme = "light"        # "dark" (default) or "light"
 ```
 
-The navigator uses a dark TokyoNight palette by default. Set `theme = "light"` for a light palette. Full per-theme auto-detection will be added once Herdr sends the theme name via `HERDR_PLUGIN_CONTEXT_JSON`.
+The navigator uses a dark TokyoNight palette by default. Set `theme = "light"`
+for a light palette. Full per-theme auto-detection will be added once Herdr
+sends the theme name via `HERDR_PLUGIN_CONTEXT_JSON`.
 
 ## Usage
 
