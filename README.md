@@ -27,12 +27,6 @@ navigable by keyboard.
 - **Live agent status**: Working agents show a braille spinner; status updates
   in real time without reopening
 - **Herdr-native colors**: TokyoNight palette, consistent with the Herdr UI
-
-  > **Theme auto-detection** — Herdr currently does not expose the active theme
-  > name to plugins. The navigator uses a dark TokyoNight palette by default,
-  > configurable to `"light"` in `herdr-plugin.toml:7`. Full per-theme color
-  > matching will be added once Herdr sends the theme name via
-  > `HERDR_PLUGIN_CONTEXT_JSON`.
 - **Automatic tracking**: hooks into `workspace.focused`, `pane.focused`,
   `tab.focused` events to build `MRU` history
 
@@ -95,6 +89,23 @@ herdr server reload-config
 ```
 
 Press the shortcut to open the navigator popup.
+
+## Configuration
+
+Open the plugin manifest at the path shown by:
+
+```bash
+herdr plugin list --json | grep manifest_path
+```
+
+Add or edit the `theme` field:
+
+```toml
+# ~/.local/share/herdr-recent-navigator/herdr-plugin.toml
+theme = "light"        # "dark" (default) or "light"
+```
+
+The navigator uses a dark TokyoNight palette by default. Set `theme = "light"` for a light palette. Full per-theme auto-detection will be added once Herdr sends the theme name via `HERDR_PLUGIN_CONTEXT_JSON`.
 
 ## Usage
 

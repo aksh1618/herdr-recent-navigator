@@ -62,6 +62,7 @@ version = "$VERSION"
 description = "Recent workspaces, tabs, panes, and AI agents switcher for Herdr."
 min_herdr_version = "0.7.4"
 platforms = ["macos", "linux"]
+theme = "dark"
 
 [[actions]]
 id = "open"
@@ -129,8 +130,10 @@ if command -v herdr &>/dev/null; then
   info "Linking plugin into Herdr..."
   herdr plugin link "$INSTALL_DIR"
   printf "\n  ${GREEN}${BOLD}✔ Installation complete!${NC}\n"
-  printf "  ${DIM}Bind a shortcut to${NC} ${BOLD}recent-navigator.open${NC} ${DIM}in your Herdr config.${NC}\n\n"
+  printf "  ${DIM}Bind a shortcut to${NC} ${BOLD}recent-navigator.open${NC} ${DIM}in your Herdr config.${NC}\n"
+  printf "  ${DIM}Configure theme at${NC} ${BOLD}%s/herdr-plugin.toml${NC}${DIM}.${NC}\n\n" "$INSTALL_DIR"
 else
   warn "Herdr not found. Install Herdr first, then run:"
-  printf "  ${CYAN}herdr plugin link${NC} ${DIM}%s${NC}\n\n" "$INSTALL_DIR"
+  printf "  ${CYAN}herdr plugin link${NC} ${DIM}%s${NC}\n" "$INSTALL_DIR"
+  printf "  ${DIM}Configure theme at${NC} ${BOLD}%s/herdr-plugin.toml${NC}${DIM}.${NC}\n\n" "$INSTALL_DIR"
 fi
