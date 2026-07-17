@@ -4,6 +4,8 @@ A recent workspaces/tabs/panes switcher for Herdr. Opens an overlay listing
 recently focused workspaces, tabs, panes, and AI agents — fuzzy-searchable and
 navigable by keyboard.
 
+![Screenshot](https://github.com/beyondlex/images/blob/main/herdr-recent-navigator-1.png)
+
 ## Features
 
 - **Four category tabs**: Workspaces, Tabs, Agents, Panes — switch with `Tab`
