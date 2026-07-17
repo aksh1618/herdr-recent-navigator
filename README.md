@@ -4,21 +4,20 @@ A recent workspaces/tabs/panes switcher for [Herdr](https://herdr.dev/) **≥0.7
 recently focused workspaces, tabs, panes, and AI agents — fuzzy-searchable and
 navigable by keyboard.
 
-
-![Screenshot](https://github.com/beyondlex/images/blob/main/herdr-recent-navigator-snapshot.png)
+![Screenshot](https://github.com/beyondlex/images/blob/main/recent-navigator.jpg)
 
 <p align="center">
   <img alt="Herdr 0.7.4+" src="https://img.shields.io/badge/Herdr-0.7.4%2B-6693ff" />
   <img alt="Linux and macOS" src="https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-2eb14f" />
-  <img alt="Release" src="https://img.shields.io/github/v/release/beyondlex/herdr-recent-navigator
-" />
+  <img alt="Release" src="https://img.shields.io/github/v/release/beyondlex/herdr-recent-navigator" />
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-cd933e" /></a>
 </p>
 
 ## Demo
 
-<video src="https://github.com/beyondlex/images/blob/main/videos/recent-navigator.mp4" controls="controls" muted="muted" style="max-width: 1370px" autoplay="autoplay" loop="loop">
-</video>
+<p align="center">
+  <img alt="demo" src="https://github.com/beyondlex/images/blob/main/recent-navigator.gif" width="559px" />
+</p>
 
 ## Features
 
