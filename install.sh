@@ -48,53 +48,53 @@ id = "open"
 title = "Open Navigator"
 description = "Open the recent items navigator"
 contexts = ["global", "workspace"]
-command = ["\$HERDR_PLUGIN_DIR/herdr-recent-navigator", "--pane-open"]
+command = ["herdr-recent-navigator", "--pane-open"]
 
 [[actions]]
 id = "focus-workspaces"
 title = "Quick Focus: Workspaces"
 description = "Open navigator focused on Workspaces tab"
 contexts = ["global", "workspace"]
-command = ["\$HERDR_PLUGIN_DIR/herdr-recent-navigator", "--pane-open", "--view", "workspaces"]
+command = ["herdr-recent-navigator", "--pane-open", "--view", "workspaces"]
 
 [[actions]]
 id = "focus-tabs"
 title = "Quick Focus: Tabs"
 description = "Open navigator focused on Tabs tab"
 contexts = ["global", "workspace"]
-command = ["\$HERDR_PLUGIN_DIR/herdr-recent-navigator", "--pane-open", "--view", "tabs"]
+command = ["herdr-recent-navigator", "--pane-open", "--view", "tabs"]
 
 [[actions]]
 id = "focus-agents"
 title = "Quick Focus: Agents"
 description = "Open navigator focused on Agents tab"
 contexts = ["global", "workspace"]
-command = ["\$HERDR_PLUGIN_DIR/herdr-recent-navigator", "--pane-open", "--view", "agents"]
+command = ["herdr-recent-navigator", "--pane-open", "--view", "agents"]
 
 [[actions]]
 id = "focus-panes"
 title = "Quick Focus: Panes"
 description = "Open navigator focused on Panes tab"
 contexts = ["global", "workspace"]
-command = ["\$HERDR_PLUGIN_DIR/herdr-recent-navigator", "--pane-open", "--view", "panes"]
+command = ["herdr-recent-navigator", "--pane-open", "--view", "panes"]
 
 [[events]]
 on = "workspace.focused"
-command = ["\$HERDR_PLUGIN_DIR/herdr-recent-navigator", "track"]
+command = ["herdr-recent-navigator", "track"]
 
 [[events]]
 on = "pane.focused"
-command = ["\$HERDR_PLUGIN_DIR/herdr-recent-navigator", "track"]
+command = ["herdr-recent-navigator", "track"]
 
 [[events]]
 on = "tab.focused"
-command = ["\$HERDR_PLUGIN_DIR/herdr-recent-navigator", "track"]
+command = ["herdr-recent-navigator", "track"]
 
 [[panes]]
 id = "navigator"
 title = "Recent Navigator"
 placement = "popup"
-command = ["\$HERDR_PLUGIN_DIR/herdr-recent-navigator"]
+command = ["herdr-recent-navigator"]
 PLUGIN_EOF
 
 # Symlink into PATH
