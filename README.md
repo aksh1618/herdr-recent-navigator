@@ -60,9 +60,13 @@ committed to MRU history.
 Set `cycle_popup_on_first = true` (manifest key) to open the popup on the
 **first** press instead, with the selection already on the MRU-previous
 pane — herdr's prefix is one-shot (no tmux-style `repeat-time`), so this is
-the only way every press after the first can be a bare `Tab`. The
-single-press toggle then commits on timeout or `Enter` instead of
-instantly.
+the only way every press after the first can be a bare `Tab`.
+
+The commit window is two-tier: while only the opening press has happened
+(the pending quick-toggle), the popup commits after `cycle_first_timeout_ms`
+(default 250); once you press again — i.e. you're actually cycling —
+`cycle_timeout_ms` (default 800) applies. Focusing another pane by other
+means mid-cycle cancels the popup instead of yanking focus back.
 
 ```toml
 [[keys.command]]

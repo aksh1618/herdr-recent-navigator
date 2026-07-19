@@ -15,6 +15,9 @@ cycle_timeout_ms = 800
 # pane) so every subsequent press is a bare Tab inside the popup. The
 # single-press toggle then commits on timeout or Enter instead of instantly.
 cycle_popup_on_first = true
+# Commit window while only the opening press has happened (the pending
+# quick-toggle). Once a second press arrives, cycle_timeout_ms applies.
+cycle_first_timeout_ms = 250
 
 [[build]]
 command = ["cargo", "build", "--release"]

@@ -65,6 +65,7 @@ platforms = ["macos", "linux"]
 theme = "dark"
 cycle_timeout_ms = 800
 cycle_popup_on_first = false
+cycle_first_timeout_ms = 250
 
 [[actions]]
 id = "cycle-panes"

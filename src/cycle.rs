@@ -45,6 +45,7 @@ use crate::models::NavigationNode;
 use crate::tracker::{self, MruKind};
 
 const DEFAULT_TIMEOUT_MS: u64 = 800;
+const DEFAULT_FIRST_TIMEOUT_MS: u64 = 250;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct CyclePane {
@@ -66,6 +67,11 @@ pub struct CycleSession {
     /// Panes the user focused by other means during the session window.
     #[serde(default)]
     pub post_focus: Vec<CyclePane>,
+    /// Number of cycle presses in this session (the opening press counts).
+    /// Until a second press arrives the popup is a pending quick-toggle and
+    /// commits on the (much shorter) first-press timeout.
+    #[serde(default)]
+    pub presses: u32,
     /// Whether the cycle popup is showing (presses move the highlight
     /// instead of focusing panes).
     #[serde(default)]
@@ -158,6 +164,21 @@ fn popup_on_first() -> bool {
     manifest_value()
         .and_then(|v| v.get("cycle_popup_on_first")?.as_bool())
         .unwrap_or(false)
+}
+
+/// Commit timeout while the popup is still a pending quick-toggle (only the
+/// opening press has happened). Manifest key `cycle_first_timeout_ms`.
+fn first_timeout_ms() -> u64 {
+    manifest_value()
+        .and_then(|v| v.get("cycle_first_timeout_ms")?.as_integer())
+        .map(|n| n.max(0) as u64)
+        .unwrap_or(DEFAULT_FIRST_TIMEOUT_MS)
+}
+
+/// Pick the popup's commit window: quick-toggle (≤1 press) commits fast;
+/// once the user starts cycling, the relaxed window applies.
+fn commit_timeout(presses: u32, first: u64, normal: u64) -> u64 {
+    if presses <= 1 { first.min(normal) } else { normal }
 }
 
 fn fresh(s: &CycleSession, now: u64, timeout: u64) -> bool {
@@ -350,12 +371,14 @@ pub fn run_cycle(reverse: bool) -> Result<()> {
         if s.popup_open {
             // The popup is showing: presses only move the highlight.
             s.position = step(s.position, s.order.len(), reverse);
+            s.presses = s.presses.saturating_add(1);
             s.last_press_at = now;
             return save_session(&s);
         }
         // Second press within the window: open the popup with the selection
         // advanced one step. Focus does not move until commit.
         s.position = step(s.position, s.order.len(), reverse);
+        s.presses = s.presses.saturating_add(1);
         s.last_press_at = now;
         match open_cycle_popup() {
             Ok(pane_id) => {
@@ -398,6 +421,7 @@ pub fn run_cycle(reverse: bool) -> Result<()> {
         position: 0,
         landed: None,
         post_focus: Vec::new(),
+        presses: 1,
         popup_open: false,
         popup_pane_id: None,
     };
@@ -497,6 +521,7 @@ fn popup_loop(
     labels: &HashMap<String, (String, String)>,
 ) -> Result<PopupOutcome> {
     let timeout = timeout_ms();
+    let first_timeout = first_timeout_ms();
     loop {
         // ── Follow the session file (under lock, small critical section) ──
         let session = {
@@ -507,7 +532,15 @@ fn popup_loop(
                     return Ok(PopupOutcome::Quit);
                 }
                 Some(s) => {
-                    if now_ms().saturating_sub(s.last_press_at) > timeout {
+                    if !s.post_focus.is_empty() {
+                        // The user focused another pane by other means
+                        // mid-cycle: cancel rather than yank focus away.
+                        delete_session();
+                        reconcile_records(&s)?;
+                        return Ok(PopupOutcome::Quit);
+                    }
+                    let window = commit_timeout(s.presses, first_timeout, timeout);
+                    if now_ms().saturating_sub(s.last_press_at) > window {
                         // Timeout: commit the highlighted pane.
                         let target = s.order[s.position].pane_id.clone();
                         delete_session();
@@ -535,6 +568,7 @@ fn popup_loop(
             if let Some(mut s) = load_session() {
                 if s.started_at == initial.started_at && !s.order.is_empty() {
                     s.position = step(s.position, s.order.len(), reverse);
+                    s.presses = s.presses.saturating_add(1);
                     s.last_press_at = now_ms();
                     save_session(&s)?;
                 }
@@ -678,6 +712,7 @@ mod tests {
             position,
             landed: None,
             post_focus: Vec::new(),
+            presses: 1,
             popup_open: false,
             popup_pane_id: None,
         }
@@ -943,7 +978,7 @@ mod tests {
         with_temp_dir(|dir| {
             fs::write(
                 dir.join("herdr-plugin.toml"),
-                "cycle_timeout_ms = 123\ncycle_popup_on_first = true\n",
+                "cycle_timeout_ms = 123\ncycle_popup_on_first = true\ncycle_first_timeout_ms = 77\n",
             )
             .unwrap();
             // SAFETY: with_temp_dir holds the global env lock for the
@@ -953,15 +988,32 @@ mod tests {
             }
             let t = timeout_ms();
             let p = popup_on_first();
+            let ft = first_timeout_ms();
             unsafe {
                 std::env::remove_var("HERDR_PLUGIN_ROOT");
             }
             assert_eq!(t, 123);
             assert!(p);
+            assert_eq!(ft, 77);
             // Without the env var: defaults.
             assert_eq!(timeout_ms(), DEFAULT_TIMEOUT_MS);
             assert!(!popup_on_first());
+            assert_eq!(first_timeout_ms(), DEFAULT_FIRST_TIMEOUT_MS);
         });
+    }
+
+    // ── commit_timeout ──
+
+    #[test]
+    fn test_commit_timeout_two_tier() {
+        // Quick-toggle (opening press only): short window.
+        assert_eq!(commit_timeout(0, 250, 800), 250);
+        assert_eq!(commit_timeout(1, 250, 800), 250);
+        // Cycling underway: relaxed window.
+        assert_eq!(commit_timeout(2, 250, 800), 800);
+        assert_eq!(commit_timeout(9, 250, 800), 800);
+        // Misconfigured first > normal: clamp to normal.
+        assert_eq!(commit_timeout(1, 5000, 800), 800);
     }
 
     // ── active_popup_session ──
