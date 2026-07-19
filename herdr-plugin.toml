@@ -11,6 +11,10 @@ theme = "dark"
 # commit on modifier release, which terminals can't see; tmux repeat-time
 # (500) and wezterm/vim leader timeouts (1000) bracket this default.
 cycle_timeout_ms = 800
+# Open the popup on the FIRST press (selection starts on the MRU-previous
+# pane) so every subsequent press is a bare Tab inside the popup. The
+# single-press toggle then commits on timeout or Enter instead of instantly.
+cycle_popup_on_first = true
 
 [[build]]
 command = ["cargo", "build", "--release"]

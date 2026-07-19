@@ -64,6 +64,7 @@ min_herdr_version = "0.7.4"
 platforms = ["macos", "linux"]
 theme = "dark"
 cycle_timeout_ms = 800
+cycle_popup_on_first = false
 
 [[actions]]
 id = "cycle-panes"

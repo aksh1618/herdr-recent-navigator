@@ -57,6 +57,13 @@ While a session is active, focus events are absorbed so panes you merely
 hop *through* never pollute recency order; only the pane you land on is
 committed to MRU history.
 
+Set `cycle_popup_on_first = true` (manifest key) to open the popup on the
+**first** press instead, with the selection already on the MRU-previous
+pane — herdr's prefix is one-shot (no tmux-style `repeat-time`), so this is
+the only way every press after the first can be a bare `Tab`. The
+single-press toggle then commits on timeout or `Enter` instead of
+instantly.
+
 ```toml
 [[keys.command]]
 key = "prefix+tab"

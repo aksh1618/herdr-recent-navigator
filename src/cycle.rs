@@ -135,22 +135,29 @@ pub fn now_ms() -> u64 {
     chrono::Utc::now().timestamp_millis() as u64
 }
 
+/// Parse the plugin's own manifest (`herdr-plugin.toml` under
+/// `HERDR_PLUGIN_ROOT`). Mirrors the manifest `theme` fallback in `main.rs`.
+fn manifest_value() -> Option<toml::Value> {
+    let root = std::env::var("HERDR_PLUGIN_ROOT").ok()?;
+    let content = fs::read_to_string(PathBuf::from(root).join("herdr-plugin.toml")).ok()?;
+    content.parse::<toml::Value>().ok()
+}
+
 /// Read `cycle_timeout_ms` from the plugin manifest, falling back to the
-/// default. Mirrors the manifest `theme` fallback in `main.rs`.
+/// default.
 pub fn timeout_ms() -> u64 {
-    let Ok(root) = std::env::var("HERDR_PLUGIN_ROOT") else {
-        return DEFAULT_TIMEOUT_MS;
-    };
-    let path = PathBuf::from(root).join("herdr-plugin.toml");
-    let Ok(content) = fs::read_to_string(path) else {
-        return DEFAULT_TIMEOUT_MS;
-    };
-    content
-        .parse::<toml::Value>()
-        .ok()
+    manifest_value()
         .and_then(|v| v.get("cycle_timeout_ms")?.as_integer())
         .map(|n| n.max(0) as u64)
         .unwrap_or(DEFAULT_TIMEOUT_MS)
+}
+
+/// Whether the popup opens on the FIRST press (every subsequent press is a
+/// bare Tab inside the popup) instead of after an instant headless hop.
+fn popup_on_first() -> bool {
+    manifest_value()
+        .and_then(|v| v.get("cycle_popup_on_first")?.as_bool())
+        .unwrap_or(false)
 }
 
 fn fresh(s: &CycleSession, now: u64, timeout: u64) -> bool {
@@ -375,7 +382,7 @@ pub fn run_cycle(reverse: bool) -> Result<()> {
         reconcile_records(&stale)?;
     }
 
-    // First press: build a fresh order and hop straight to MRU-previous.
+    // First press: build a fresh order.
     let (nodes, focused) = ipc::fetch_all_nodes()?;
     let mru = tracker::load_mru();
     let (pane_ts, _, _) = tracker::build_timestamp_maps(&mru);
@@ -394,6 +401,25 @@ pub fn run_cycle(reverse: bool) -> Result<()> {
         popup_open: false,
         popup_pane_id: None,
     };
+
+    // Popup-first mode: open the popup right away with the selection on the
+    // MRU-previous pane; every subsequent press is a bare Tab in the popup.
+    if popup_on_first() {
+        s.position = step(0, s.order.len(), reverse);
+        match open_cycle_popup() {
+            Ok(pane_id) => {
+                s.popup_open = true;
+                s.popup_pane_id = pane_id;
+                return save_session(&s);
+            }
+            Err(e) => {
+                log::error!("Cycle popup failed ({e}); falling back to headless hop");
+                s.position = 0;
+            }
+        }
+    }
+
+    // Headless first hop: straight to MRU-previous.
     let len = s.order.len();
     let mut pos = s.position;
     for _ in 0..len {
@@ -907,6 +933,34 @@ mod tests {
             end_session_now().unwrap();
             assert!(load_session().is_none());
             assert!(!tracker::load_mru().is_empty());
+        });
+    }
+
+    // ── manifest options ──
+
+    #[test]
+    fn test_manifest_cycle_options() {
+        with_temp_dir(|dir| {
+            fs::write(
+                dir.join("herdr-plugin.toml"),
+                "cycle_timeout_ms = 123\ncycle_popup_on_first = true\n",
+            )
+            .unwrap();
+            // SAFETY: with_temp_dir holds the global env lock for the
+            // closure, same discipline as HERDR_PLUGIN_STATE_DIR itself.
+            unsafe {
+                std::env::set_var("HERDR_PLUGIN_ROOT", dir);
+            }
+            let t = timeout_ms();
+            let p = popup_on_first();
+            unsafe {
+                std::env::remove_var("HERDR_PLUGIN_ROOT");
+            }
+            assert_eq!(t, 123);
+            assert!(p);
+            // Without the env var: defaults.
+            assert_eq!(timeout_ms(), DEFAULT_TIMEOUT_MS);
+            assert!(!popup_on_first());
         });
     }
 
