@@ -17,7 +17,7 @@ cycle_timeout_ms = 2000
 cycle_popup_on_first = true
 # Commit window while only the opening press has happened (the pending
 # quick-toggle). Once a second press arrives, cycle_timeout_ms applies.
-cycle_first_timeout_ms = 250
+cycle_first_timeout_ms = 500
 
 [[build]]
 command = ["cargo", "build", "--release"]
