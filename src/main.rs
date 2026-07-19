@@ -603,19 +603,34 @@ fn handle_pane_open() -> Result<()> {
     }
 
     // Open a new navigator pane
+    // Use HERDR_PANE_COLS (set by herdr from estimate_pane_size) to detect
+    // narrow panes — if < 80 cols, use 90% popup width for mobile-friendly view.
+    let pane_cols = std::env::var("HERDR_PANE_COLS")
+        .ok()
+        .and_then(|s| s.parse::<u16>().ok());
+    let narrow = pane_cols.map(|w| w < 80).unwrap_or(false);
+    log::info!(
+        "pane-open: HERDR_PANE_COLS={:?} → {}",
+        pane_cols,
+        if narrow { "90% width" } else { "manifest width (60%)" },
+    );
+    let mut args = vec![
+        "plugin",
+        "pane",
+        "open",
+        "--plugin",
+        &plugin_id,
+        "--entrypoint",
+        "navigator",
+        "--placement",
+        "popup",
+        "--focus",
+    ];
+    if narrow {
+        args.extend_from_slice(&["--width", "90%"]);
+    }
     let output = ProcessCommand::new(&herdr_bin)
-        .args([
-            "plugin",
-            "pane",
-            "open",
-            "--plugin",
-            &plugin_id,
-            "--entrypoint",
-            "navigator",
-            "--placement",
-            "popup",
-            "--focus",
-        ])
+        .args(&args)
         .output()
         .context("Failed to run herdr plugin pane open")?;
 

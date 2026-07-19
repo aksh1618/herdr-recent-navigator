@@ -53,8 +53,8 @@ impl Palette {
         Self {
             accent: Color::Rgb(46, 125, 233),       // #2e7de9
             surface0: Color::Rgb(203, 204, 209),    // #cbccd1
-            surface1: Color::Rgb(184, 185, 191),    // #b8b9bf
-            surface_dim: Color::Rgb(216, 217, 222), // #d8d9de
+            surface1: Color::Rgb(216, 217, 222),    // #d8d9de
+            surface_dim: Color::Rgb(239, 241, 245), // #eff1f5
             overlay0: Color::Rgb(156, 157, 165),    // #9c9da5
             overlay1: Color::Rgb(139, 140, 148),    // #8b8d94
             text: Color::Rgb(55, 96, 191),          // #3760bf
@@ -235,11 +235,11 @@ fn render_tabs(frame: &mut Frame, state: &AppState, area: Rect, p: &Palette, nar
             .block(
                 Block::default()
                     .borders(Borders::BOTTOM)
-                    .border_style(Style::default().fg(p.surface0)),
+                    .border_style(Style::default().fg(p.surface_dim)),
             )
             .highlight_style(
                 Style::default()
-                    .fg(p.surface0)
+                    .fg(p.surface_dim)
                     .bg(p.accent)
                     .add_modifier(Modifier::BOLD),
             )
