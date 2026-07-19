@@ -1,5 +1,6 @@
 mod app;
 mod cli;
+mod cycle;
 mod data;
 mod format;
 mod ipc;
@@ -56,9 +57,11 @@ fn main() -> Result<()> {
         builder.init();
     }
 
-    // ── Track mode ──
-    if let Some(CliCommand::Track) = &cli.command {
-        return handle_track();
+    // ── Track / Cycle modes ──
+    match &cli.command {
+        Some(CliCommand::Track) => return handle_track(),
+        Some(CliCommand::Cycle { reverse }) => return cycle::run_cycle(*reverse),
+        None => {}
     }
 
     // ── --pane-open mode — toggle the overlay pane ──
@@ -162,6 +165,12 @@ fn run_inner(
         Ok((nodes, info)) => (nodes, info, true),
         Err(e) => return Err(anyhow::anyhow!("Failed to connect to Herdr: {e}")),
     };
+
+    // Opening the switcher deliberately ends any active cycle session;
+    // reconcile it before the startup focus-recording below touches MRU.
+    if let Err(e) = cycle::end_session_now() {
+        log::error!("Failed to end cycle session: {e}");
+    }
 
     // Record current focus at navigator startup (single pass over nodes)
     if connected && let Some(fpi) = &focused_pane_info {
@@ -349,6 +358,27 @@ fn handle_track() -> Result<()> {
     let data = v
         .get("data")
         .context("HERDR_PLUGIN_EVENT_JSON missing 'data' field")?;
+
+    // ── Cycle-session gate ──
+    // While an alt-tab cycle session is active, focus events are absorbed
+    // into the session (so hopped-through panes never pollute MRU order).
+    // A stale session is reconciled into MRU before normal recording resumes.
+    let pane_event = if event_name == "pane_focused" {
+        match (
+            data.get("pane_id").and_then(|s| s.as_str()),
+            data.get("workspace_id").and_then(|s| s.as_str()),
+        ) {
+            (Some(p), Some(w)) => Some((p, w)),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    match cycle::on_track_event(pane_event) {
+        Ok(cycle::TrackDisposition::Absorbed) => return Ok(()),
+        Ok(cycle::TrackDisposition::Proceed) => {}
+        Err(e) => log::error!("Cycle session check failed ({e}); recording normally"),
+    }
 
     match event_name {
         "workspace_focused" => {

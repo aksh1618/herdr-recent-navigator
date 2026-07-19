@@ -37,6 +37,26 @@ navigable by keyboard.
 - **Automatic tracking**: hooks into `workspace.focused`, `pane.focused`,
   `tab.focused` events to build `MRU` history
 
+## Fork addition: alt-tab MRU pane cycling
+
+This fork adds a headless `cycle` subcommand with two actions,
+`cycle-panes` and `cycle-panes-reverse`: each press focuses the next pane in
+most-recently-used order, no popup. Presses within `cycle_timeout_ms`
+(manifest key, default 2000) continue the same session over a frozen MRU
+snapshot, walking deeper into the stack — alt-tab semantics under a prefix
+key, where modifier release can't be observed. While a session is active,
+focus events are absorbed so panes you merely hop *through* never pollute
+recency order; when the session expires (or the switcher popup opens), only
+the pane you landed on is committed to MRU history.
+
+```toml
+[[keys.command]]
+key = "prefix+tab"
+type = "plugin_action"
+command = "beyondlex.herdr-recent-navigator.cycle-panes"
+description = "Cycle panes (MRU, alt-tab style)"
+```
+
 ## Install
 
 > **Warning:** Requires Herdr **≥ 0.7.4**. Check with `herdr -V`.  

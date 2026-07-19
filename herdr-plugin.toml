@@ -5,6 +5,9 @@ description = "Recent workspaces, tabs, panes, and AI agents switcher for Herdr.
 min_herdr_version = "0.7.4"
 platforms = ["macos", "linux"]
 theme = "dark"
+# Milliseconds a cycle session stays alive after the last press; presses
+# within this window walk deeper into the MRU stack instead of restarting.
+cycle_timeout_ms = 2000
 
 [[build]]
 command = ["cargo", "build", "--release"]
@@ -44,6 +47,20 @@ title = "Quick Focus: Panes"
 description = "Open navigator focused on Panes tab"
 contexts = ["global", "workspace"]
 command = ["./target/release/herdr-recent-navigator", "--pane-open", "--view", "panes"]
+
+[[actions]]
+id = "cycle-panes"
+title = "Cycle Panes (MRU)"
+description = "Focus the next pane in most-recently-used order; repeated presses within the timeout walk deeper (alt-tab style)"
+contexts = ["global", "workspace"]
+command = ["./target/release/herdr-recent-navigator", "cycle"]
+
+[[actions]]
+id = "cycle-panes-reverse"
+title = "Cycle Panes Backward (MRU)"
+description = "Step backward through the most-recently-used pane order"
+contexts = ["global", "workspace"]
+command = ["./target/release/herdr-recent-navigator", "cycle", "--reverse"]
 
 [[events]]
 on = "workspace.focused"

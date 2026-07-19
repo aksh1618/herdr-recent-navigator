@@ -63,6 +63,21 @@ description = "Recent workspaces, tabs, panes, and AI agents switcher for Herdr.
 min_herdr_version = "0.7.4"
 platforms = ["macos", "linux"]
 theme = "dark"
+cycle_timeout_ms = 2000
+
+[[actions]]
+id = "cycle-panes"
+title = "Cycle Panes (MRU)"
+description = "Focus the next pane in most-recently-used order; repeated presses within the timeout walk deeper (alt-tab style)"
+contexts = ["global", "workspace"]
+command = ["herdr-recent-navigator", "cycle"]
+
+[[actions]]
+id = "cycle-panes-reverse"
+title = "Cycle Panes Backward (MRU)"
+description = "Step backward through the most-recently-used pane order"
+contexts = ["global", "workspace"]
+command = ["herdr-recent-navigator", "cycle", "--reverse"]
 
 [[actions]]
 id = "open"

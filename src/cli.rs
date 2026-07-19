@@ -30,4 +30,11 @@ pub struct Cli {
 pub enum Command {
     /// Record a pane.focused event to the MRU state file.
     Track,
+    /// Focus the next pane in most-recently-used order (alt-tab style).
+    /// Presses within the session timeout walk deeper into the MRU stack.
+    Cycle {
+        /// Step backward through the recency order instead.
+        #[arg(long)]
+        reverse: bool,
+    },
 }
