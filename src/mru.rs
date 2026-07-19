@@ -455,8 +455,6 @@ mod tests {
         assert_eq!(clamped, 0, "Default selected index should be 0");
     }
 
-    /// Test C: Active-only filter
-    #[test]
     /// Workspace tab: groups by workspace_id
     #[test]
     fn test_build_workspace_items() {

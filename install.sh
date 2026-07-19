@@ -63,7 +63,7 @@ description = "Recent workspaces, tabs, panes, and AI agents switcher for Herdr.
 min_herdr_version = "0.7.4"
 platforms = ["macos", "linux"]
 theme = "dark"
-cycle_timeout_ms = 2000
+cycle_timeout_ms = 800
 
 [[actions]]
 id = "cycle-panes"

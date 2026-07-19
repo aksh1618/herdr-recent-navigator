@@ -33,7 +33,7 @@ use ratatui::backend::CrosstermBackend;
 use cli::{Cli, Command as CliCommand};
 use models::{AppState, CategoryTab, FocusTarget, KeyAction};
 
-fn pane_lock_path() -> PathBuf {
+pub(crate) fn pane_lock_path() -> PathBuf {
     std::env::temp_dir().join("herdr-recent-navigator").join("pane.lock")
 }
 
@@ -75,6 +75,15 @@ fn main() -> Result<()> {
             }
         }
         return handle_pane_open();
+    }
+
+    // ── Cycle popup mode ──
+    // The pane entrypoint runs with no args; if an active cycle session
+    // opened this pane, run the lean cycle popup instead of the navigator.
+    if cli.command.is_none() && !cli.pane_open {
+        if let Some(session) = cycle::active_popup_session() {
+            return cycle::run_popup(session);
+        }
     }
 
     // ── Normal (pane) mode: delegate to run_inner for data + state init ──
@@ -693,7 +702,7 @@ fn read_manifest_theme() -> Option<String> {
 ///
 /// Response shape:
 ///   {"id":"...","result":{"plugin_pane":{"pane":{"pane_id":"w1:p2",...}}}}
-fn extract_pane_id(response: &str) -> Option<String> {
+pub(crate) fn extract_pane_id(response: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(response).ok()?;
     v.get("result")?
         .get("plugin_pane")?
@@ -712,19 +721,24 @@ mod integration_tests {
     #[cfg(feature = "mock")]
     #[test]
     fn test_run_inner_with_mock_data() {
-        let cli = Cli::parse_from(["herdr-recent-navigator", "--mock"]);
-        let result = run_inner(&cli);
-        assert!(result.is_ok(), "run_inner should succeed with --mock");
+        // with_temp_dir isolates HERDR_PLUGIN_STATE_DIR and serializes with
+        // other state-dir tests — without it this test can read another
+        // test's mru.json through the shared env var.
+        crate::test_helpers::with_temp_dir(|_dir| {
+            let cli = Cli::parse_from(["herdr-recent-navigator", "--mock"]);
+            let result = run_inner(&cli);
+            assert!(result.is_ok(), "run_inner should succeed with --mock");
 
-        let (state, pane_ts, tab_ts, ws_ts, ctx, connected) = result.unwrap();
-        assert!(!state.nodes.is_empty(), "Mock data should produce nodes");
-        assert!(!connected, "Mock mode should be disconnected");
-        assert_eq!(state.current_category, CategoryTab::Workspaces);
-        assert!(ctx.self_pane_id.is_none(), "No focused pane in mock mode");
-        // Timestamp maps should be empty (no prior MRU data)
-        assert!(pane_ts.is_empty());
-        assert!(tab_ts.is_empty());
-        assert!(ws_ts.is_empty());
+            let (state, pane_ts, tab_ts, ws_ts, ctx, connected) = result.unwrap();
+            assert!(!state.nodes.is_empty(), "Mock data should produce nodes");
+            assert!(!connected, "Mock mode should be disconnected");
+            assert_eq!(state.current_category, CategoryTab::Workspaces);
+            assert!(ctx.self_pane_id.is_none(), "No focused pane in mock mode");
+            // Timestamp maps should be empty (no prior MRU data)
+            assert!(pane_ts.is_empty());
+            assert!(tab_ts.is_empty());
+            assert!(ws_ts.is_empty());
+        });
     }
 
     /// Test that derive_active_context handles missing HERDR_PLUGIN_CONTEXT_JSON.

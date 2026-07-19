@@ -6,26 +6,45 @@
 //! same session over a frozen snapshot of the MRU order; after the timeout
 //! the next press starts fresh from the live MRU state.
 //!
+//! Press semantics (mirroring GUI alt-tab, which commits on modifier
+//! release — the timeout stands in for the release):
+//! 1. First press: instantly focus the MRU-previous pane, no popup.
+//! 2. Second press within the window: open the navigator popup in cycle
+//!    mode with the selection advanced one step. Focus does NOT move.
+//! 3. Further presses (or Tab/arrows inside the popup) move the highlight.
+//! 4. Timeout expiry — or Enter — focuses the highlighted pane and closes
+//!    the popup. Esc cancels back to the pane the cycle started from.
+//!
 //! While a session is active, `track` events are absorbed into the session
 //! instead of `mru.json` so panes that are merely hopped *through* never
-//! pollute recency order. When the session ends (next press after timeout,
-//! or the TUI opening), only the pane the cycle landed on — plus any panes
-//! the user focused by other means during the window — are reconciled into
-//! the MRU store, in chronological order.
+//! pollute recency order. When the session ends, only the pane the cycle
+//! landed on — plus any panes the user focused by other means during the
+//! window — are reconciled into the MRU store, in chronological order.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
+use std::io::stdout;
 use std::path::PathBuf;
+use std::process::Command;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use fs2::FileExt;
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
 use serde::{Deserialize, Serialize};
 
 use crate::ipc::{self, FocusedPaneInfo};
 use crate::models::NavigationNode;
 use crate::tracker::{self, MruKind};
 
-const DEFAULT_TIMEOUT_MS: u64 = 2000;
+const DEFAULT_TIMEOUT_MS: u64 = 800;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct CyclePane {
@@ -47,6 +66,13 @@ pub struct CycleSession {
     /// Panes the user focused by other means during the session window.
     #[serde(default)]
     pub post_focus: Vec<CyclePane>,
+    /// Whether the cycle popup is showing (presses move the highlight
+    /// instead of focusing panes).
+    #[serde(default)]
+    pub popup_open: bool,
+    /// The popup's own pane id, excluded from post_focus absorption.
+    #[serde(default)]
+    pub popup_pane_id: Option<String>,
 }
 
 /// Outcome of consulting the cycle session for an incoming track event.
@@ -161,8 +187,9 @@ fn reconcile_records(s: &CycleSession) -> Result<()> {
 }
 
 /// Consult the session for an incoming track event. Pane focus events that
-/// are not the cycle's own echo are remembered for reconciliation; all
-/// events during an active session are absorbed (kept out of `mru.json`).
+/// are not the cycle's own echo (landed pane or the popup pane itself) are
+/// remembered for reconciliation; all events during an active session are
+/// absorbed (kept out of `mru.json`).
 pub fn on_track_event(pane_event: Option<(&str, &str)>) -> Result<TrackDisposition> {
     let now = now_ms();
     let timeout = timeout_ms();
@@ -170,8 +197,9 @@ pub fn on_track_event(pane_event: Option<(&str, &str)>) -> Result<TrackDispositi
     match load_session() {
         Some(mut s) if fresh(&s, now, timeout) => {
             if let Some((pane_id, ws_id)) = pane_event {
-                let is_echo = s.landed.as_ref().is_some_and(|l| l.pane_id == pane_id);
-                if !is_echo {
+                let is_own = s.landed.as_ref().is_some_and(|l| l.pane_id == pane_id)
+                    || s.popup_pane_id.as_deref() == Some(pane_id);
+                if !is_own {
                     let p = CyclePane {
                         pane_id: pane_id.to_string(),
                         workspace_id: ws_id.to_string(),
@@ -184,6 +212,12 @@ pub fn on_track_event(pane_event: Option<(&str, &str)>) -> Result<TrackDispositi
             }
             Ok(TrackDisposition::Absorbed)
         }
+        Some(s) if s.popup_open => {
+            // The popup owns an expired session's lifecycle (it commits on
+            // expiry itself); don't reconcile out from under it.
+            let _ = s;
+            Ok(TrackDisposition::Absorbed)
+        }
         Some(s) => {
             delete_session();
             reconcile_records(&s)?;
@@ -194,8 +228,8 @@ pub fn on_track_event(pane_event: Option<(&str, &str)>) -> Result<TrackDispositi
 }
 
 /// End any session (fresh or stale) and reconcile it. Called when the
-/// navigator TUI opens: opening the switcher is a deliberate action that
-/// terminates a cycle.
+/// navigator TUI opens normally: opening the switcher is a deliberate
+/// action that terminates a cycle.
 pub fn end_session_now() -> Result<()> {
     let _lock = acquire_lock()?;
     if let Some(s) = load_session() {
@@ -250,26 +284,48 @@ fn build_order(
     order
 }
 
-/// Advance the session by one step (skipping panes that fail to focus,
-/// e.g. closed since the snapshot) and persist it. Returns false if no pane
-/// in the order could be focused.
-fn advance_and_focus(s: &mut CycleSession, reverse: bool, now: u64) -> bool {
-    let len = s.order.len();
-    if len == 0 {
-        return false;
+/// Open the navigator pane in cycle-popup mode. Returns the popup pane id.
+fn open_cycle_popup() -> Result<Option<String>> {
+    let herdr_bin = std::env::var("HERDR_BIN_PATH")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "herdr".to_string());
+    let plugin_id = std::env::var("HERDR_PLUGIN_ID")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "beyondlex.herdr-recent-navigator".to_string());
+    let output = Command::new(&herdr_bin)
+        .args([
+            "plugin",
+            "pane",
+            "open",
+            "--plugin",
+            &plugin_id,
+            "--entrypoint",
+            "navigator",
+            "--placement",
+            "popup",
+            "--focus",
+        ])
+        .output()
+        .context("Failed to run herdr plugin pane open for cycle popup")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "herdr plugin pane open failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
-    let mut pos = s.position;
-    for _ in 0..len {
-        pos = step(pos, len, reverse);
-        let cand = s.order[pos].clone();
-        if ipc::focus_pane(&cand.pane_id).is_ok() {
-            s.position = pos;
-            s.landed = Some(cand);
-            s.last_press_at = now;
-            return true;
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    let pane_id = crate::extract_pane_id(&stdout_str);
+    if let Some(id) = &pane_id {
+        // Keep the prefix+u toggle coherent with this popup.
+        let lock = crate::pane_lock_path();
+        if let Some(parent) = lock.parent() {
+            let _ = fs::create_dir_all(parent);
         }
+        let _ = fs::write(&lock, id);
     }
-    false
+    Ok(pane_id)
 }
 
 /// The `cycle` subcommand: one alt-tab step through MRU pane order.
@@ -280,21 +336,46 @@ pub fn run_cycle(reverse: bool) -> Result<()> {
 
     // Continue an active session.
     if let Some(mut s) = load_session().filter(|s| fresh(s, now, timeout)) {
-        if advance_and_focus(&mut s, reverse, now) {
+        if s.order.is_empty() {
+            delete_session();
+            return Ok(());
+        }
+        if s.popup_open {
+            // The popup is showing: presses only move the highlight.
+            s.position = step(s.position, s.order.len(), reverse);
+            s.last_press_at = now;
             return save_session(&s);
         }
-        // Nothing in the snapshot is focusable anymore: end the session and
-        // fall through to build a fresh one.
-        delete_session();
-        reconcile_records(&s)?;
+        // Second press within the window: open the popup with the selection
+        // advanced one step. Focus does not move until commit.
+        s.position = step(s.position, s.order.len(), reverse);
+        s.last_press_at = now;
+        match open_cycle_popup() {
+            Ok(pane_id) => {
+                s.popup_open = true;
+                s.popup_pane_id = pane_id;
+                return save_session(&s);
+            }
+            Err(e) => {
+                // Popup unavailable: fall back to headless hopping.
+                log::error!("Cycle popup failed ({e}); falling back to headless hop");
+                let cand = s.order[s.position].clone();
+                if ipc::focus_pane(&cand.pane_id).is_ok() {
+                    s.landed = Some(cand);
+                }
+                return save_session(&s);
+            }
+        }
     }
 
-    // Reconcile a stale session before starting over.
+    // Reconcile a stale session before starting over. A stale popup session
+    // is orphaned (its popup crashed or never committed): reconcile it too.
     if let Some(stale) = load_session() {
         delete_session();
         reconcile_records(&stale)?;
     }
 
+    // First press: build a fresh order and hop straight to MRU-previous.
     let (nodes, focused) = ipc::fetch_all_nodes()?;
     let mru = tracker::load_mru();
     let (pane_ts, _, _) = tracker::build_timestamp_maps(&mru);
@@ -310,11 +391,222 @@ pub fn run_cycle(reverse: bool) -> Result<()> {
         position: 0,
         landed: None,
         post_focus: Vec::new(),
+        popup_open: false,
+        popup_pane_id: None,
     };
-    if advance_and_focus(&mut s, reverse, now) {
-        save_session(&s)?;
+    let len = s.order.len();
+    let mut pos = s.position;
+    for _ in 0..len {
+        pos = step(pos, len, reverse);
+        let cand = s.order[pos].clone();
+        if ipc::focus_pane(&cand.pane_id).is_ok() {
+            s.position = pos;
+            s.landed = Some(cand);
+            save_session(&s)?;
+            return Ok(());
+        }
     }
     Ok(())
+}
+
+// ── Cycle popup mode ──
+
+/// If a cycle session with an open popup exists, return it. Called by the
+/// pane entrypoint to decide between normal navigator and cycle popup mode.
+/// Freshness is not required: an expired session is committed immediately.
+pub fn active_popup_session() -> Option<CycleSession> {
+    let _lock = acquire_lock().ok()?;
+    load_session().filter(|s| s.popup_open && !s.order.is_empty())
+}
+
+enum PopupOutcome {
+    /// Focus this pane (commit or cancel target).
+    Focus(String),
+    /// Session was superseded or vanished; just exit.
+    Quit,
+}
+
+/// Run the cycle popup: a minimal MRU pane list that follows the session
+/// file. Commits (focuses the highlighted pane) when the session expires or
+/// on Enter; Esc cancels back to the session's origin pane.
+pub fn run_popup(initial: CycleSession) -> Result<()> {
+    // Label lookup for rendering; popup still works if the fetch fails.
+    let labels: HashMap<String, (String, String)> = ipc::fetch_all_nodes()
+        .map(|(nodes, _)| {
+            nodes
+                .into_iter()
+                .map(|n| {
+                    let pane = n.pane_name.unwrap_or_else(|| "untitled".into());
+                    (n.pane_id, (n.workspace_name, pane))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    enable_raw_mode()?;
+    let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
+    let outcome = popup_loop(&mut terminal, &initial, &labels);
+
+    // Terminal cleanup mirrors the normal navigator popup.
+    {
+        use std::io::Write;
+        let mut out = stdout();
+        let _ = write!(out, "\x1b[?25h\x1b[0m");
+        let _ = out.flush();
+    }
+    disable_raw_mode()?;
+    let _ = fs::remove_file(crate::pane_lock_path());
+
+    if let Ok(PopupOutcome::Focus(pane_id)) = &outcome {
+        if let Err(e) = ipc::focus_pane(pane_id) {
+            log::error!("Cycle popup: failed to focus {pane_id}: {e}");
+        }
+    }
+    outcome.map(|_| ())
+}
+
+fn popup_loop(
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    initial: &CycleSession,
+    labels: &HashMap<String, (String, String)>,
+) -> Result<PopupOutcome> {
+    let timeout = timeout_ms();
+    loop {
+        // ── Follow the session file (under lock, small critical section) ──
+        let session = {
+            let _lock = acquire_lock()?;
+            match load_session() {
+                None => return Ok(PopupOutcome::Quit),
+                Some(s) if s.started_at != initial.started_at => {
+                    return Ok(PopupOutcome::Quit);
+                }
+                Some(s) => {
+                    if now_ms().saturating_sub(s.last_press_at) > timeout {
+                        // Timeout: commit the highlighted pane.
+                        let target = s.order[s.position].pane_id.clone();
+                        delete_session();
+                        return Ok(PopupOutcome::Focus(target));
+                    }
+                    s
+                }
+            }
+        };
+
+        terminal.draw(|frame| render_popup(frame, &session, labels))?;
+
+        if !event::poll(Duration::from_millis(30))? {
+            continue;
+        }
+        let Event::Key(key) = event::read()? else {
+            continue;
+        };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+
+        let advance = |reverse: bool| -> Result<()> {
+            let _lock = acquire_lock()?;
+            if let Some(mut s) = load_session() {
+                if s.started_at == initial.started_at && !s.order.is_empty() {
+                    s.position = step(s.position, s.order.len(), reverse);
+                    s.last_press_at = now_ms();
+                    save_session(&s)?;
+                }
+            }
+            Ok(())
+        };
+
+        match key.code {
+            KeyCode::Enter => {
+                let _lock = acquire_lock()?;
+                if let Some(s) = load_session().filter(|s| s.started_at == initial.started_at) {
+                    let target = s.order[s.position].pane_id.clone();
+                    delete_session();
+                    return Ok(PopupOutcome::Focus(target));
+                }
+                return Ok(PopupOutcome::Quit);
+            }
+            KeyCode::Esc => {
+                let _lock = acquire_lock()?;
+                if let Some(s) = load_session().filter(|s| s.started_at == initial.started_at) {
+                    // Cancel: back to the pane the cycle started from.
+                    let origin = s.order[0].pane_id.clone();
+                    delete_session();
+                    return Ok(PopupOutcome::Focus(origin));
+                }
+                return Ok(PopupOutcome::Quit);
+            }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let _lock = acquire_lock()?;
+                delete_session();
+                return Ok(PopupOutcome::Quit);
+            }
+            KeyCode::Tab | KeyCode::Down | KeyCode::Char('j') => advance(false)?,
+            KeyCode::BackTab | KeyCode::Up | KeyCode::Char('k') => advance(true)?,
+            _ => {}
+        }
+    }
+}
+
+fn render_popup(
+    frame: &mut ratatui::Frame,
+    session: &CycleSession,
+    labels: &HashMap<String, (String, String)>,
+) {
+    let area = frame.area();
+    let accent = ratatui::style::Color::Cyan;
+    let dim = ratatui::style::Color::DarkGray;
+
+    let items: Vec<ListItem> = session
+        .order
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let (ws, pane) = labels
+                .get(&p.pane_id)
+                .cloned()
+                .unwrap_or_else(|| (p.workspace_id.clone(), p.pane_id.clone()));
+            let marker = if i == 0 { " (current)" } else { "" };
+            ListItem::new(Line::from(vec![
+                Span::styled(format!(" {ws} "), Style::default().fg(dim)),
+                Span::raw(pane),
+                Span::styled(marker, Style::default().fg(dim)),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(accent))
+                .title(" Cycling panes (MRU) "),
+        )
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD))
+        .highlight_symbol("▶ ");
+
+    let list_area = Rect {
+        height: area.height.saturating_sub(1),
+        ..area
+    };
+    let mut state = ListState::default();
+    state.select(Some(session.position.min(session.order.len().saturating_sub(1))));
+    frame.render_stateful_widget(list, list_area, &mut state);
+
+    if area.height > 1 {
+        let footer = Rect {
+            y: area.y + area.height - 1,
+            height: 1,
+            ..area
+        };
+        frame.render_widget(
+            Line::from(Span::styled(
+                " tab next · enter switch · esc cancel ",
+                Style::default().fg(dim),
+            )),
+            footer,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -360,6 +652,8 @@ mod tests {
             position,
             landed: None,
             post_focus: Vec::new(),
+            popup_open: false,
+            popup_pane_id: None,
         }
     }
 
@@ -425,8 +719,27 @@ mod tests {
             let loaded = load_session().unwrap();
             assert_eq!(loaded.position, 1);
             assert_eq!(loaded.order.len(), 2);
+            assert!(!loaded.popup_open);
             delete_session();
             assert!(load_session().is_none());
+        });
+    }
+
+    #[test]
+    fn test_session_loads_pre_popup_format() {
+        // Session files written before the popup fields existed must load.
+        with_temp_dir(|_dir| {
+            let old = r#"{
+                "started_at": 1, "last_press_at": 1,
+                "order": [{"pane_id": "a", "workspace_id": "w1"}],
+                "position": 0
+            }"#;
+            let path = session_path();
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, old).unwrap();
+            let s = load_session().unwrap();
+            assert!(!s.popup_open);
+            assert!(s.popup_pane_id.is_none());
         });
     }
 
@@ -519,6 +832,38 @@ mod tests {
     }
 
     #[test]
+    fn test_track_event_popup_pane_not_absorbed_into_post_focus() {
+        with_temp_dir(|_dir| {
+            let mut s = session(&[("a", "w1"), ("b", "w1")], 1, now_ms());
+            s.popup_open = true;
+            s.popup_pane_id = Some("popup-pane".into());
+            save_session(&s).unwrap();
+
+            let d = on_track_event(Some(("popup-pane", "w1"))).unwrap();
+            assert_eq!(d, TrackDisposition::Absorbed);
+            assert!(
+                load_session().unwrap().post_focus.is_empty(),
+                "popup's own pane must not be queued for reconcile"
+            );
+        });
+    }
+
+    #[test]
+    fn test_track_event_expired_popup_session_still_absorbs() {
+        with_temp_dir(|_dir| {
+            // Popup session past its timeout: the popup commits it itself;
+            // track must not reconcile-and-delete out from under it.
+            let mut s = session(&[("a", "w1"), ("b", "w1")], 1, 1); // ancient
+            s.popup_open = true;
+            save_session(&s).unwrap();
+
+            let d = on_track_event(Some(("z", "w3"))).unwrap();
+            assert_eq!(d, TrackDisposition::Absorbed);
+            assert!(load_session().is_some(), "popup session must survive");
+        });
+    }
+
+    #[test]
     fn test_track_event_stale_session_reconciles_then_proceeds() {
         with_temp_dir(|_dir| {
             let mut s = session(&[("a", "w1"), ("b", "w1")], 1, 1); // ancient
@@ -562,6 +907,22 @@ mod tests {
             end_session_now().unwrap();
             assert!(load_session().is_none());
             assert!(!tracker::load_mru().is_empty());
+        });
+    }
+
+    // ── active_popup_session ──
+
+    #[test]
+    fn test_active_popup_session_requires_popup_flag() {
+        with_temp_dir(|_dir| {
+            let s = session(&[("a", "w1"), ("b", "w1")], 1, now_ms());
+            save_session(&s).unwrap();
+            assert!(active_popup_session().is_none());
+
+            let mut s = s;
+            s.popup_open = true;
+            save_session(&s).unwrap();
+            assert!(active_popup_session().is_some());
         });
     }
 }

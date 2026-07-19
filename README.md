@@ -39,15 +39,23 @@ navigable by keyboard.
 
 ## Fork addition: alt-tab MRU pane cycling
 
-This fork adds a headless `cycle` subcommand with two actions,
-`cycle-panes` and `cycle-panes-reverse`: each press focuses the next pane in
-most-recently-used order, no popup. Presses within `cycle_timeout_ms`
-(manifest key, default 2000) continue the same session over a frozen MRU
-snapshot, walking deeper into the stack — alt-tab semantics under a prefix
-key, where modifier release can't be observed. While a session is active,
-focus events are absorbed so panes you merely hop *through* never pollute
-recency order; when the session expires (or the switcher popup opens), only
-the pane you landed on is committed to MRU history.
+This fork adds a `cycle` subcommand with two actions, `cycle-panes` and
+`cycle-panes-reverse`, giving alt-tab semantics under a prefix key (where
+modifier release can't be observed — GUI switchers commit on release; here a
+timeout stands in for it):
+
+1. **First press** instantly focuses the MRU-previous pane — no popup.
+2. **Second press** within `cycle_timeout_ms` (manifest key, default 800;
+   tmux `repeat-time` is 500, wezterm/vim leader timeouts are 1000) opens a
+   popup with the selection advanced one step. Focus doesn't move yet.
+3. **Further presses** (or `Tab`/`Shift+Tab`/arrows inside the popup) move
+   the highlight through a frozen MRU snapshot, with wrap-around.
+4. **Timeout expiry or `Enter`** focuses the highlighted pane and closes the
+   popup; `Esc` cancels back to the pane the cycle started from.
+
+While a session is active, focus events are absorbed so panes you merely
+hop *through* never pollute recency order; only the pane you land on is
+committed to MRU history.
 
 ```toml
 [[keys.command]]

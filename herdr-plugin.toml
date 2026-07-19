@@ -5,9 +5,12 @@ description = "Recent workspaces, tabs, panes, and AI agents switcher for Herdr.
 min_herdr_version = "0.7.4"
 platforms = ["macos", "linux"]
 theme = "dark"
-# Milliseconds a cycle session stays alive after the last press; presses
-# within this window walk deeper into the MRU stack instead of restarting.
-cycle_timeout_ms = 2000
+# Milliseconds a cycle session stays alive after the last press. Presses
+# within this window continue the session (popup from the second press);
+# expiry commits the highlighted pane. GUI switchers (KDE/Firefox/macOS)
+# commit on modifier release, which terminals can't see; tmux repeat-time
+# (500) and wezterm/vim leader timeouts (1000) bracket this default.
+cycle_timeout_ms = 800
 
 [[build]]
 command = ["cargo", "build", "--release"]
