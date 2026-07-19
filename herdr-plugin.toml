@@ -10,7 +10,7 @@ theme = "dark"
 # expiry commits the highlighted pane. GUI switchers (KDE/Firefox/macOS)
 # commit on modifier release, which terminals can't see; tmux repeat-time
 # (500) and wezterm/vim leader timeouts (1000) bracket this default.
-cycle_timeout_ms = 800
+cycle_timeout_ms = 2000
 # Open the popup on the FIRST press (selection starts on the MRU-previous
 # pane) so every subsequent press is a bare Tab inside the popup. The
 # single-press toggle then commits on timeout or Enter instead of instantly.
