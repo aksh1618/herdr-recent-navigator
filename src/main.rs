@@ -690,7 +690,7 @@ fn handle_pane_open() -> Result<()> {
 /// Read the `theme` field from the plugin's own manifest (`herdr-plugin.toml`).
 /// Used as fallback when Herdr doesn't provide `theme_name` in the context.
 /// Returns `None` if the manifest is missing, unreadable, or has no theme field.
-fn read_manifest_theme() -> Option<String> {
+pub(crate) fn read_manifest_theme() -> Option<String> {
     let root = std::env::var("HERDR_PLUGIN_ROOT").ok()?;
     let path = PathBuf::from(root).join("herdr-plugin.toml");
     let content = std::fs::read_to_string(path).ok()?;

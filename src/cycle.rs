@@ -34,15 +34,12 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use fs2::FileExt;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
 use serde::{Deserialize, Serialize};
 
 use crate::ipc::{self, FocusedPaneInfo};
-use crate::models::NavigationNode;
+use crate::models::{AgentStatus, DisplayItem, NavigationNode};
 use crate::tracker::{self, MruKind};
+use crate::ui;
 
 const DEFAULT_TIMEOUT_MS: u64 = 800;
 const DEFAULT_FIRST_TIMEOUT_MS: u64 = 250;
@@ -476,26 +473,60 @@ enum PopupOutcome {
     Quit,
 }
 
-/// Run the cycle popup: a minimal MRU pane list that follows the session
-/// file. Commits (focuses the highlighted pane) when the session expires or
-/// on Enter; Esc cancels back to the session's origin pane.
-pub fn run_popup(initial: CycleSession) -> Result<()> {
-    // Label lookup for rendering; popup still works if the fetch fails.
-    let labels: HashMap<String, (String, String)> = ipc::fetch_all_nodes()
-        .map(|(nodes, _)| {
-            nodes
-                .into_iter()
-                .map(|n| {
-                    let pane = n.pane_name.unwrap_or_else(|| "untitled".into());
-                    (n.pane_id, (n.workspace_name, pane))
-                })
-                .collect()
+/// Build rich display rows for the frozen cycle order — the same
+/// `DisplayItem::Pane` shape the navigator's Panes tab renders, so the
+/// popup shows pane/tab/workspace columns and live agent state.
+fn build_cycle_items(order: &[CyclePane], nodes: &[NavigationNode]) -> Vec<DisplayItem> {
+    order
+        .iter()
+        .map(|p| match nodes.iter().find(|n| n.pane_id == p.pane_id) {
+            Some(n) => DisplayItem::Pane {
+                pane_id: n.pane_id.clone(),
+                pane_name: n.pane_name.clone().unwrap_or_else(|| n.pane_id.clone()),
+                tab: n.tab_name.clone(),
+                workspace: n.workspace_name.clone(),
+                agent_id: n.agent_id.clone(),
+                status: n.agent_status.clone(),
+                last_accessed_at: 0,
+            },
+            // Pane vanished since the snapshot: render ids as a fallback.
+            None => DisplayItem::Pane {
+                pane_id: p.pane_id.clone(),
+                pane_name: p.pane_id.clone(),
+                tab: String::new(),
+                workspace: p.workspace_id.clone(),
+                agent_id: None,
+                status: AgentStatus::None,
+                last_accessed_at: 0,
+            },
         })
-        .unwrap_or_default();
+        .collect()
+}
+
+/// Theme for the popup, derived the same way the navigator derives it:
+/// `theme_name` from `HERDR_PLUGIN_CONTEXT_JSON`, else the manifest fallback.
+fn popup_theme_name() -> Option<String> {
+    std::env::var("HERDR_PLUGIN_CONTEXT_JSON")
+        .ok()
+        .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok())
+        .and_then(|v| v.get("theme_name")?.as_str().map(String::from))
+        .or_else(crate::read_manifest_theme)
+}
+
+/// Run the cycle popup: the navigator's rich Panes rows in frozen cycle
+/// order, following the session file. Commits (focuses the highlighted
+/// pane) when the session expires or on Enter; Esc cancels back to the
+/// session's origin pane.
+pub fn run_popup(initial: CycleSession) -> Result<()> {
+    // Rich rows need live node data (names, agent status); the popup still
+    // works from bare ids if the fetch fails.
+    let nodes = ipc::fetch_all_nodes().map(|(n, _)| n).unwrap_or_default();
+    let items = build_cycle_items(&initial.order, &nodes);
+    let theme = popup_theme_name();
 
     enable_raw_mode()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
-    let outcome = popup_loop(&mut terminal, &initial, &labels);
+    let outcome = popup_loop(&mut terminal, &initial, &items, theme.as_deref());
 
     // Terminal cleanup mirrors the normal navigator popup.
     {
@@ -518,10 +549,12 @@ pub fn run_popup(initial: CycleSession) -> Result<()> {
 fn popup_loop(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     initial: &CycleSession,
-    labels: &HashMap<String, (String, String)>,
+    items: &[DisplayItem],
+    theme: Option<&str>,
 ) -> Result<PopupOutcome> {
     let timeout = timeout_ms();
     let first_timeout = first_timeout_ms();
+    let mut tick: u32 = 0;
     loop {
         // ── Follow the session file (under lock, small critical section) ──
         let session = {
@@ -551,7 +584,9 @@ fn popup_loop(
             }
         };
 
-        terminal.draw(|frame| render_popup(frame, &session, labels))?;
+        tick = tick.wrapping_add(1);
+        let selected = session.position.min(items.len().saturating_sub(1));
+        terminal.draw(|frame| ui::render_cycle(frame, theme, items, selected, tick))?;
 
         if !event::poll(Duration::from_millis(30))? {
             continue;
@@ -605,67 +640,6 @@ fn popup_loop(
             KeyCode::BackTab | KeyCode::Up | KeyCode::Char('k') => advance(true)?,
             _ => {}
         }
-    }
-}
-
-fn render_popup(
-    frame: &mut ratatui::Frame,
-    session: &CycleSession,
-    labels: &HashMap<String, (String, String)>,
-) {
-    let area = frame.area();
-    let accent = ratatui::style::Color::Cyan;
-    let dim = ratatui::style::Color::DarkGray;
-
-    let items: Vec<ListItem> = session
-        .order
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            let (ws, pane) = labels
-                .get(&p.pane_id)
-                .cloned()
-                .unwrap_or_else(|| (p.workspace_id.clone(), p.pane_id.clone()));
-            let marker = if i == 0 { " (current)" } else { "" };
-            ListItem::new(Line::from(vec![
-                Span::styled(format!(" {ws} "), Style::default().fg(dim)),
-                Span::raw(pane),
-                Span::styled(marker, Style::default().fg(dim)),
-            ]))
-        })
-        .collect();
-
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(accent))
-                .title(" Cycling panes (MRU) "),
-        )
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD))
-        .highlight_symbol("▶ ");
-
-    let list_area = Rect {
-        height: area.height.saturating_sub(1),
-        ..area
-    };
-    let mut state = ListState::default();
-    state.select(Some(session.position.min(session.order.len().saturating_sub(1))));
-    frame.render_stateful_widget(list, list_area, &mut state);
-
-    if area.height > 1 {
-        let footer = Rect {
-            y: area.y + area.height - 1,
-            height: 1,
-            ..area
-        };
-        frame.render_widget(
-            Line::from(Span::styled(
-                " tab next · enter switch · esc cancel ",
-                Style::default().fg(dim),
-            )),
-            footer,
-        );
     }
 }
 
@@ -768,6 +742,39 @@ mod tests {
         let order = build_order(&nodes, None, &ts);
         let ids: Vec<&str> = order.iter().map(|p| p.pane_id.as_str()).collect();
         assert_eq!(ids, vec!["a"]);
+    }
+
+    // ── build_cycle_items ──
+
+    #[test]
+    fn test_build_cycle_items_preserves_order_and_context() {
+        let nodes = vec![node("a", "w1"), node("b", "w2")];
+        let s = session(&[("b", "w2"), ("a", "w1"), ("gone", "w3")], 0, 42);
+        let items = build_cycle_items(&s.order, &nodes);
+        assert_eq!(items.len(), 3, "every order entry gets a row");
+        match &items[0] {
+            DisplayItem::Pane {
+                pane_id,
+                workspace,
+                tab,
+                ..
+            } => {
+                assert_eq!(pane_id, "b");
+                assert_eq!(workspace, "w2-name");
+                assert_eq!(tab, "tab");
+            }
+            other => panic!("expected Pane, got {other:?}"),
+        }
+        match &items[2] {
+            DisplayItem::Pane {
+                pane_id, workspace, ..
+            } => {
+                // Dead pane: id fallback, workspace id as label.
+                assert_eq!(pane_id, "gone");
+                assert_eq!(workspace, "w3");
+            }
+            other => panic!("expected Pane, got {other:?}"),
+        }
     }
 
     // ── session persistence ──

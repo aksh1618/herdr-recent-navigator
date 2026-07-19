@@ -206,6 +206,104 @@ pub fn render(frame: &mut Frame, state: &AppState, displayed: &[DisplayItem], to
     render_status_bar(frame, chunks[3], &p, narrow);
 }
 
+// ── Cycle popup render ──────────────────────────────────────────────────────
+
+/// Render the cycle popup with the same rich rows as the navigator's Panes
+/// tab (pane/tab/workspace columns, agent icon + working spinner, theme
+/// palette) — only the chrome differs: a cycle title instead of category
+/// tabs/search, and cycle-specific key hints.
+pub fn render_cycle(
+    frame: &mut Frame,
+    theme_name: Option<&str>,
+    items: &[DisplayItem],
+    selected_index: usize,
+    tick: u32,
+) {
+    let p = Palette::for_theme(theme_name);
+    let area = frame.area();
+
+    if !min_terminal_size(area) {
+        let msg = "Terminal too small — resize to at least 20×4";
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(msg, Style::default().fg(p.red))))
+                .style(Style::default().bg(p.surface_dim)),
+            area,
+        );
+        return;
+    }
+    let narrow = area.width < 60;
+
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(p.surface_dim)),
+        area,
+    );
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(2),
+        ])
+        .split(area);
+
+    let title = Line::from(vec![
+        Span::styled(
+            " Cycle ",
+            Style::default()
+                .fg(p.surface_dim)
+                .bg(p.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  most recent panes", Style::default().fg(p.overlay0)),
+    ]);
+    frame.render_widget(
+        Paragraph::new(title).block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(p.surface_dim)),
+        ),
+        chunks[0],
+    );
+
+    render_column_header(frame, &CategoryTab::Panes, chunks[1], &p, narrow);
+    render_list(frame, items, selected_index, "", tick, chunks[2], &p);
+
+    let hints: Vec<Span> = if narrow {
+        vec![
+            Span::styled(" Tab", Style::default().fg(p.accent)),
+            Span::styled("↓", Style::default().fg(p.overlay0)),
+            Span::styled(" ↵", Style::default().fg(p.accent)),
+            Span::styled("Go", Style::default().fg(p.overlay0)),
+            Span::styled(" Esc", Style::default().fg(p.accent)),
+            Span::styled("✕", Style::default().fg(p.overlay0)),
+        ]
+    } else {
+        vec![
+            Span::styled("   Tab", Style::default().fg(p.accent)),
+            Span::styled(" Next", Style::default().fg(p.overlay0)),
+            Span::styled("   S-Tab", Style::default().fg(p.accent)),
+            Span::styled(" Prev", Style::default().fg(p.overlay0)),
+            Span::styled("   Enter", Style::default().fg(p.accent)),
+            Span::styled(" Focus", Style::default().fg(p.overlay0)),
+            Span::styled("   Esc", Style::default().fg(p.accent)),
+            Span::styled(" Cancel", Style::default().fg(p.overlay0)),
+        ]
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(hints))
+            .block(
+                Block::default()
+                    .borders(Borders::TOP)
+                    .border_style(Style::default().fg(p.surface0)),
+            )
+            .style(Style::default().fg(p.overlay0)),
+        chunks[3],
+    );
+}
+
 // ── Sub-renderers ───────────────────────────────────────────────────────────
 
 fn render_tabs(frame: &mut Frame, state: &AppState, area: Rect, p: &Palette, narrow: bool) {
