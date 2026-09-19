@@ -966,13 +966,13 @@ pub(crate) fn fallback_theme_name() -> Option<String> {
 /// 2. `$HERDR_PLUGIN_ROOT/herdr-plugin.toml`: the manifest. Kept as a fallback
 ///    for existing installs, but installers regenerate it, so anything set
 ///    there is lost on upgrade.
-struct PluginSettings {
+pub(crate) struct PluginSettings {
     user: Option<toml::Value>,
     manifest: Option<toml::Value>,
 }
 
 impl PluginSettings {
-    fn load() -> Self {
+    pub(crate) fn load() -> Self {
         let user = std::env::var("HERDR_PLUGIN_CONFIG_DIR")
             .ok()
             .and_then(|d| read_toml(PathBuf::from(d).join("config.toml")));
@@ -982,7 +982,7 @@ impl PluginSettings {
         PluginSettings { user, manifest }
     }
 
-    fn get(&self, key: &str) -> Option<&toml::Value> {
+    pub(crate) fn get(&self, key: &str) -> Option<&toml::Value> {
         self.user
             .as_ref()
             .and_then(|v| v.get(key))

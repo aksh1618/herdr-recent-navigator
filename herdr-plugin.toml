@@ -4,6 +4,10 @@ version = "0.6.5"
 description = "Recent workspaces, tabs, panes, and AI agents switcher for Herdr."
 min_herdr_version = "0.7.4"
 platforms = ["macos", "linux"]
+# Cycle tuning. These are defaults: any key set in the plugin's own config dir
+# (`herdr plugin config-dir <id>`, i.e. $HERDR_PLUGIN_CONFIG_DIR/config.toml)
+# wins per key, and that file survives installers regenerating this manifest.
+#
 # Milliseconds a cycle session stays alive after the last press. Presses
 # within this window continue the session (popup from the second press);
 # expiry commits the highlighted pane. GUI switchers (KDE/Firefox/macOS)

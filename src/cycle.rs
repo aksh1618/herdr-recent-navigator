@@ -138,38 +138,35 @@ pub fn now_ms() -> u64 {
     chrono::Utc::now().timestamp_millis() as u64
 }
 
-/// Parse the plugin's own manifest (`herdr-plugin.toml` under
-/// `HERDR_PLUGIN_ROOT`). Mirrors the manifest `theme` fallback in `main.rs`.
-fn manifest_value() -> Option<toml::Value> {
-    let root = std::env::var("HERDR_PLUGIN_ROOT").ok()?;
-    let content = fs::read_to_string(PathBuf::from(root).join("herdr-plugin.toml")).ok()?;
-    content.parse::<toml::Value>().ok()
+/// Non-negative integer setting, read through the plugin's two config layers
+/// (`$HERDR_PLUGIN_CONFIG_DIR/config.toml`, then the manifest).
+fn setting_u64(key: &str) -> Option<u64> {
+    let settings = crate::PluginSettings::load();
+    let n = settings.get(key)?.as_integer()?;
+    Some(n.max(0) as u64)
 }
 
-/// Read `cycle_timeout_ms` from the plugin manifest, falling back to the
-/// default.
+/// Boolean setting, read through the same two layers.
+fn setting_bool(key: &str) -> Option<bool> {
+    let settings = crate::PluginSettings::load();
+    settings.get(key)?.as_bool()
+}
+
+/// How long a cycle session stays alive after the last press.
 pub fn timeout_ms() -> u64 {
-    manifest_value()
-        .and_then(|v| v.get("cycle_timeout_ms")?.as_integer())
-        .map(|n| n.max(0) as u64)
-        .unwrap_or(DEFAULT_TIMEOUT_MS)
+    setting_u64("cycle_timeout_ms").unwrap_or(DEFAULT_TIMEOUT_MS)
 }
 
 /// Whether the popup opens on the FIRST press (every subsequent press is a
 /// bare Tab inside the popup) instead of after an instant headless hop.
 fn popup_on_first() -> bool {
-    manifest_value()
-        .and_then(|v| v.get("cycle_popup_on_first")?.as_bool())
-        .unwrap_or(false)
+    setting_bool("cycle_popup_on_first").unwrap_or(false)
 }
 
 /// Commit timeout while the popup is still a pending quick-toggle (only the
-/// opening press has happened). Manifest key `cycle_first_timeout_ms`.
+/// opening press has happened). Setting key `cycle_first_timeout_ms`.
 fn first_timeout_ms() -> u64 {
-    manifest_value()
-        .and_then(|v| v.get("cycle_first_timeout_ms")?.as_integer())
-        .map(|n| n.max(0) as u64)
-        .unwrap_or(DEFAULT_FIRST_TIMEOUT_MS)
+    setting_u64("cycle_first_timeout_ms").unwrap_or(DEFAULT_FIRST_TIMEOUT_MS)
 }
 
 /// Pick the popup's commit window: quick-toggle (≤1 press) commits fast;
@@ -979,7 +976,7 @@ mod tests {
         });
     }
 
-    // ── manifest options ──
+    // ── cycle settings ──
 
     #[test]
     fn test_manifest_cycle_options() {
@@ -991,7 +988,10 @@ mod tests {
             .unwrap();
             // SAFETY: with_temp_dir holds the global env lock for the
             // closure, same discipline as HERDR_PLUGIN_STATE_DIR itself.
+            // The config dir is cleared so an ambient one (Herdr sets it for
+            // every plugin process) cannot shadow the manifest under test.
             unsafe {
+                std::env::remove_var("HERDR_PLUGIN_CONFIG_DIR");
                 std::env::set_var("HERDR_PLUGIN_ROOT", dir);
             }
             let t = timeout_ms();
@@ -1003,10 +1003,47 @@ mod tests {
             assert_eq!(t, 123);
             assert!(p);
             assert_eq!(ft, 77);
-            // Without the env var: defaults.
+            // Without either env var: defaults.
             assert_eq!(timeout_ms(), DEFAULT_TIMEOUT_MS);
             assert!(!popup_on_first());
             assert_eq!(first_timeout_ms(), DEFAULT_FIRST_TIMEOUT_MS);
+        });
+    }
+
+    #[test]
+    fn test_config_dir_overrides_manifest_cycle_options() {
+        with_temp_dir(|dir| {
+            let root = dir.join("root");
+            let conf = dir.join("conf");
+            fs::create_dir_all(&root).unwrap();
+            fs::create_dir_all(&conf).unwrap();
+            fs::write(
+                root.join("herdr-plugin.toml"),
+                "cycle_timeout_ms = 123\ncycle_popup_on_first = true\ncycle_first_timeout_ms = 77\n",
+            )
+            .unwrap();
+            // Overrides two keys and leaves cycle_first_timeout_ms to the
+            // manifest: the layers merge per key, not whole-file.
+            fs::write(
+                conf.join("config.toml"),
+                "cycle_timeout_ms = 3000\ncycle_popup_on_first = false\n",
+            )
+            .unwrap();
+            // SAFETY: see test_manifest_cycle_options.
+            unsafe {
+                std::env::set_var("HERDR_PLUGIN_ROOT", &root);
+                std::env::set_var("HERDR_PLUGIN_CONFIG_DIR", &conf);
+            }
+            let t = timeout_ms();
+            let p = popup_on_first();
+            let ft = first_timeout_ms();
+            unsafe {
+                std::env::remove_var("HERDR_PLUGIN_ROOT");
+                std::env::remove_var("HERDR_PLUGIN_CONFIG_DIR");
+            }
+            assert_eq!(t, 3000, "config dir wins over the manifest");
+            assert!(!p, "config dir wins over the manifest");
+            assert_eq!(ft, 77, "unset keys still fall back to the manifest");
         });
     }
 
