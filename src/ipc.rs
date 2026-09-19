@@ -138,6 +138,18 @@ struct TabInfo {
     workspace_id: String,
     #[serde(default)]
     label: Option<String>,
+    #[serde(default)]
+    focused: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct PaneGetResult {
+    pane: PaneTabRef,
+}
+
+#[derive(Debug, Deserialize)]
+struct PaneTabRef {
+    tab_id: String,
 }
 
 /// Wire-level agent status as returned by herdr.
@@ -236,6 +248,7 @@ fn args_to_method(args: &[&str]) -> Option<(&'static str, serde_json::Value)> {
         ["pane", "list"] => Some(("pane.list", json!({}))),
         ["workspace", "focus", id] => Some(("workspace.focus", json!({"workspace_id": id}))),
         ["tab", "focus", id] => Some(("tab.focus", json!({"tab_id": id}))),
+        ["pane", "get", id] => Some(("pane.get", json!({"pane_id": id}))),
         ["pane", "zoom", id, "--off"] => Some(("pane.zoom", json!({"pane_id": id, "mode": "off"}))),
         ["pane", "process-info", "--pane", id] => {
             Some(("pane.process_info", json!({"pane_id": id})))
@@ -678,8 +691,36 @@ pub fn focus_tab(tab_id: &str) -> Result<()> {
 /// Focus a specific pane via herdr CLI.
 /// Uses `pane zoom --off` to avoid the toggle-zoom behavior — the pane
 /// gets focused but never enters zoomed/maximized state.
+///
+/// `pane.zoom` moves the server's focused pane but leaves the client viewing
+/// whatever tab it was on, and the client re-asserts that view when the
+/// navigator's popup closes — which silently undoes the focus whenever the
+/// target lives in another tab. Switching the tab first makes the client's
+/// view the target's tab, so the re-assert is a no-op.
 pub fn focus_pane(pane_id: &str) -> Result<()> {
+    if let Some(tab_id) = fetch_pane_tab(pane_id)
+        && fetch_focused_tab().as_deref() != Some(tab_id.as_str())
+    {
+        focus_tab(&tab_id)?;
+    }
     run_focus(&["pane", "zoom", pane_id, "--off"])
+}
+
+/// Tab that owns `pane_id`, or `None` when the lookup fails.
+fn fetch_pane_tab(pane_id: &str) -> Option<String> {
+    herdr_cli::<PaneGetResult>(&["pane", "get", pane_id])
+        .ok()
+        .map(|r| r.pane.tab_id)
+}
+
+/// Currently focused tab id, or `None` when the lookup fails.
+fn fetch_focused_tab() -> Option<String> {
+    herdr_cli::<TabListResult>(&["tab", "list"])
+        .ok()?
+        .tabs
+        .into_iter()
+        .find(|t| t.focused)
+        .map(|t| t.tab_id)
 }
 
 fn run_focus(args: &[&str]) -> Result<()> {
