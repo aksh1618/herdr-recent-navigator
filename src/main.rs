@@ -1,5 +1,6 @@
 mod app;
 mod cli;
+mod cycle;
 mod data;
 mod format;
 mod ipc;
@@ -42,7 +43,7 @@ type RunInnerResult = Result<(
     bool,
 )>;
 
-fn pane_lock_path() -> PathBuf {
+pub(crate) fn pane_lock_path() -> PathBuf {
     std::env::temp_dir()
         .join("herdr-recent-navigator")
         .join("pane.lock")
@@ -73,6 +74,11 @@ fn main() -> Result<()> {
         return handle_track();
     }
 
+    // ── Cycle mode — alt-tab style MRU pane cycling (no TUI on first press) ──
+    if let Some(CliCommand::Cycle { reverse }) = &cli.command {
+        return cycle::run_cycle(*reverse);
+    }
+
     // ── Quick focus previous tab (no TUI) ──
     if let Some(CliCommand::QuickFocusPreviousTab) = &cli.command {
         return handle_quick_focus_previous_tab();
@@ -100,6 +106,15 @@ fn main() -> Result<()> {
             }
         }
         return handle_pane_open();
+    }
+
+    // ── Cycle popup mode ──
+    // The pane entrypoint runs with no args; if an active cycle session
+    // opened this pane, run the lean cycle popup instead of the navigator.
+    if cli.command.is_none() && !cli.pane_open {
+        if let Some(session) = cycle::active_popup_session() {
+            return cycle::run_popup(session);
+        }
     }
 
     // ── Normal (pane) mode: delegate to run_inner for data + state init ──
@@ -181,6 +196,12 @@ fn run_inner(cli: &Cli) -> RunInnerResult {
         Ok((nodes, info)) => (nodes, info, true),
         Err(e) => return Err(anyhow::anyhow!("Failed to connect to Herdr: {e}")),
     };
+
+    // Opening the switcher deliberately ends any active cycle session;
+    // reconcile it before the startup focus-recording below touches MRU.
+    if let Err(e) = cycle::end_session_now() {
+        log::error!("Failed to end cycle session: {e}");
+    }
 
     // Record current focus at navigator startup (single pass over nodes)
     if connected && let Some(fpi) = &focused_pane_info {
@@ -379,6 +400,27 @@ fn handle_track() -> Result<()> {
     let data = v
         .get("data")
         .context("HERDR_PLUGIN_EVENT_JSON missing 'data' field")?;
+
+    // ── Cycle-session gate ──
+    // While an alt-tab cycle session is active, focus events are absorbed
+    // into the session (so hopped-through panes never pollute MRU order).
+    // A stale session is reconciled into MRU before normal recording resumes.
+    let pane_event = if event_name == "pane_focused" {
+        match (
+            data.get("pane_id").and_then(|s| s.as_str()),
+            data.get("workspace_id").and_then(|s| s.as_str()),
+        ) {
+            (Some(p), Some(w)) => Some((p, w)),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    match cycle::on_track_event(pane_event) {
+        Ok(cycle::TrackDisposition::Absorbed) => return Ok(()),
+        Ok(cycle::TrackDisposition::Proceed) => {}
+        Err(e) => log::error!("Cycle session check failed ({e}); recording normally"),
+    }
 
     match event_name {
         "workspace_focused" => {
@@ -909,6 +951,13 @@ fn read_herdr_config_theme() -> Option<String> {
     Some(name.to_string())
 }
 
+/// Theme name from the sources below the plugin context: Herdr's own config
+/// first, then the plugin settings. Lets the cycle popup resolve its theme
+/// through the same chain the navigator uses.
+pub(crate) fn fallback_theme_name() -> Option<String> {
+    read_herdr_config_theme().or_else(|| PluginSettings::load().theme())
+}
+
 /// User-editable plugin settings (`theme`, `[keybindings]`, `[navigator]`).
 ///
 /// Resolved from two layers, first match wins per top-level key:
@@ -989,7 +1038,7 @@ fn read_toml(path: PathBuf) -> Option<toml::Value> {
 ///
 /// Response shape:
 ///   {"id":"...","result":{"plugin_pane":{"pane":{"pane_id":"w1:p2",...}}}}
-fn extract_pane_id(response: &str) -> Option<String> {
+pub(crate) fn extract_pane_id(response: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(response).ok()?;
     v.get("result")?
         .get("plugin_pane")?

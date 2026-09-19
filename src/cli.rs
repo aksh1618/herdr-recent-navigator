@@ -36,4 +36,11 @@ pub enum Command {
     QuickFocusPreviousPane,
     /// Focus the most recently used agent without opening the navigator UI.
     QuickFocusPreviousAgent,
+    /// Focus the next pane in most-recently-used order (alt-tab style).
+    /// Presses within the session timeout walk deeper into the MRU stack.
+    Cycle {
+        /// Step backward through the recency order instead.
+        #[arg(long)]
+        reverse: bool,
+    },
 }

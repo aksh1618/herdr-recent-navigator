@@ -43,6 +43,45 @@ navigable by keyboard.
 - **Automatic tracking**: hooks into `workspace.focused`, `pane.focused`,
   `tab.focused` events to build `MRU` history
 
+## Fork addition: alt-tab MRU pane cycling
+
+This fork adds a `cycle` subcommand with two actions, `cycle-panes` and
+`cycle-panes-reverse`, giving alt-tab semantics under a prefix key (where
+modifier release can't be observed — GUI switchers commit on release; here a
+timeout stands in for it):
+
+1. **First press** instantly focuses the MRU-previous pane — no popup.
+2. **Second press** within `cycle_timeout_ms` (manifest key, default 800;
+   tmux `repeat-time` is 500, wezterm/vim leader timeouts are 1000) opens a
+   popup with the selection advanced one step. Focus doesn't move yet.
+3. **Further presses** (or `Tab`/`Shift+Tab`/arrows inside the popup) move
+   the highlight through a frozen MRU snapshot, with wrap-around.
+4. **Timeout expiry or `Enter`** focuses the highlighted pane and closes the
+   popup; `Esc` cancels back to the pane the cycle started from.
+
+While a session is active, focus events are absorbed so panes you merely
+hop *through* never pollute recency order; only the pane you land on is
+committed to MRU history.
+
+Set `cycle_popup_on_first = true` (manifest key) to open the popup on the
+**first** press instead, with the selection already on the MRU-previous
+pane — herdr's prefix is one-shot (no tmux-style `repeat-time`), so this is
+the only way every press after the first can be a bare `Tab`.
+
+The commit window is two-tier: while only the opening press has happened
+(the pending quick-toggle), the popup commits after `cycle_first_timeout_ms`
+(default 250); once you press again — i.e. you're actually cycling —
+`cycle_timeout_ms` (default 800) applies. Focusing another pane by other
+means mid-cycle cancels the popup instead of yanking focus back.
+
+```toml
+[[keys.command]]
+key = "prefix+tab"
+type = "plugin_action"
+command = "beyondlex.herdr-recent-navigator.cycle-panes"
+description = "Cycle panes (MRU, alt-tab style)"
+```
+
 ## Install
 
 > **Warning:** Requires Herdr **≥ 0.7.4**. Check with `herdr -V`.  
